@@ -78,12 +78,11 @@ class SMTPServer(TCPServer):
     @type socket: socket
     @return: Returns encrypted connection
     """
-    def wrapSSL(self, socket):
-        connstream = ssl.wrap_socket(socket,
-                                server_side=True,
-                                certfile = self.certfile,
-                                keyfile = self.keyfile,
-                                ssl_version = self.ssl_version)
-        return connstream
+def wrapSSL(self, socket):
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    connstream = context.wrap_socket(socket, server_side=True)
+    return connstream
 
 class SMTPServer(ThreadingMixIn, SMTPServer): pass
