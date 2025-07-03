@@ -101,25 +101,8 @@ class MITMsmtp:
         else:
             raise ValueError("MITMsmtp is currently not running")
 
-# Simple placeholder classes - you'll need to replace these with your actual implementations
-class SimpleAuthHandler:
-    def toString(self):
-        return "PLAIN LOGIN"
-    
-    def matchMethod(self, line):
-        # Simple implementation - you'll need your actual auth logic
-        return SimpleAuth
-        
-class SimpleAuth:
-    def __init__(self, handler, line):
-        self.username = "test"
-        self.password = "test"
-    
-    def getUsername(self):
-        return self.username
-    
-    def getPassword(self):
-        return self.password
+# Import the proper authentication handlers
+from AuthHandler import AuthHandler
 
 class SimpleMessageHandler:
     def addMessage(self):
@@ -191,7 +174,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     # Create handlers
-    auth_handler = SimpleAuthHandler()
+    auth_handler = AuthHandler()
     message_handler = SimpleMessageHandler()
     
     # Initialize DNS server if enabled
