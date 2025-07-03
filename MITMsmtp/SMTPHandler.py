@@ -141,11 +141,30 @@ class SMTPHandler(StreamRequestHandler):
     """
     def readSender(self):
         line = self.readLine()
-        match = re.match(r"MAIL FROM:<([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>", line)
+        
+        # More flexible regex to handle various MAIL FROM formats
+        # Handles: MAIL FROM:<email@domain.com>, MAIL FROM:<>, mail from:<user@host>, etc.
+        match = re.match(r"MAIL\s+FROM:\s*<([^>]*)>", line, re.IGNORECASE)
+        
         if match is None:
-            raise ValueError("Could not read sender")
-
-        self.message.setSender(match.group(1))
+            # If regex fails, try to extract anything between < and >
+            bracket_match = re.search(r"<([^>]*)>", line)
+            if bracket_match:
+                sender = bracket_match.group(1)
+                print(f"[DEBUG] Extracted sender using fallback: '{sender}'")
+            else:
+                print(f"[ERROR] Could not parse MAIL FROM line: '{line}'")
+                raise ValueError("Could not read sender")
+        else:
+            sender = match.group(1)
+        
+        # Handle empty sender (bounce messages)
+        if sender == "":
+            sender = "<>"
+            print("[DEBUG] Empty sender detected (bounce message)")
+        
+        print(f"[DEBUG] Sender extracted: '{sender}'")
+        self.message.setSender(sender)
 
     """
     Sends a 250 OK response
@@ -162,10 +181,15 @@ class SMTPHandler(StreamRequestHandler):
             if (line == "DATA"):
                 return
 
-            match = re.match(r"RCPT TO:<([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>", line)
+            # More flexible regex for recipients too
+            match = re.match(r"RCPT\s+TO:\s*<([^>]*)>", line, re.IGNORECASE)
             if (match == None):
+                print(f"[ERROR] Could not parse RCPT TO line: '{line}'")
                 raise ValueError("Could not read recipients")
-            self.message.addRecipient(match.group(1))
+            
+            recipient = match.group(1)
+            print(f"[DEBUG] Recipient extracted: '{recipient}'")
+            self.message.addRecipient(recipient)
             self.sendOK()
 
     """
